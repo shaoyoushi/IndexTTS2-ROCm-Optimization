@@ -1,0 +1,79 @@
+# IndexTTS2 - ROCm deployment for AMD Strix Halo (gfx1151)
+# Usage:
+#   docker compose up -d       # 启动
+#   docker compose logs -f     # 查看日志
+#   docker compose down        # 停止
+#
+# WebUI: http://localhost:8765
+
+services:
+  indextts2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: indextts2
+    
+    # 主机网络模式 (按你的要求)
+    network_mode: host
+    
+    # ---- AMD GPU (ROCm) 设备映射 ----
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - "992"   # render group GID (容器内可能没有render组名)
+    
+    # ---- 安全选项 (ROCm需要) ----
+    security_opt:
+      - seccomp=unconfined
+    cap_add:
+      - SYS_PTRACE
+    
+    # ---- 环境变量 ----
+    environment:
+      # gfx1151 ROCm 兼容性
+      - HSA_OVERRIDE_GFX_VERSION=11.0.0
+      - GPU_MAX_ALLOC_PERCENT=100
+      - GPU_MAX_HEAP_SIZE=100
+      - HSA_ENABLE_SDMA=0
+      - TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
+      # MIOpen 缓存 (加速重复推理)
+      - MIOPEN_USER_DB_PATH=/app/miopen_cache
+      - MIOPEN_LOG_LEVEL=4
+      # HuggingFace 缓存
+      - HF_HOME=/app/hf_cache
+      - HF_HUB_CACHE=/app/hf_cache
+    
+    # ---- 持久化存储 ----
+    volumes:
+      # 模型缓存 (避免每次重建都下载)
+      - indextts2_checkpoints:/app/checkpoints
+      - indextts2_hf_cache:/app/hf_cache
+      - indextts2_miopen_cache:/app/miopen_cache
+      # 音色参考音频 和 输出 (映射到主机方便使用)
+      - ./audio_prompts:/app/audio_prompts
+      - ./outputs:/app/outputs
+    
+    # ---- 资源限制 ----
+    # 如果需要限制内存使用，取消下面的注释
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 64G
+    
+    # ---- 启动命令 ----
+    # 不使用 --fp16: gfx1151 上 fp16 可能产生 NaN
+    # 不使用 --cuda_kernel: BigVGAN CUDA kernel 不兼容 ROCm
+    # 不使用 --deepspeed: ROCm 上 DeepSpeed 兼容性未知
+    command: >
+      python webui.py
+      --host 0.0.0.0
+      --port 8765
+
+    restart: unless-stopped
+
+volumes:
+  indextts2_checkpoints:
+  indextts2_hf_cache:
+  indextts2_miopen_cache:
